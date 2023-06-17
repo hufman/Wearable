@@ -112,7 +112,7 @@ void battery() {
   double adcVoltage = (adcCount * vRef) / numReadings;
   double vBat = adcVoltage*1510.0/510.0; // Voltage divider from Vbat to ADC
   
-  uint8_t percent = (vBat - 3.3) / (3.8 - 3.3) * 100;
+  uint8_t percent = (vBat - 3.3) / (4.2 - 3.3) * 100;
   lbsBatteryAttr.write8(percent);
 
   char adcVoltageS[16];
@@ -121,8 +121,8 @@ void battery() {
   dtostrf(vBat, 8, 4, vBatS);
 
   char output[128];
-  sprintf(output, "adcCount = %3u = 0x%03X, adcVoltage = %sV, vBat = %s\n",
-                   adcCount, adcCount, adcVoltageS, vBatS);
+  sprintf(output, "adcCount = %3u = 0x%03X, adcVoltage = %sV, vBat = %s, percent = %u\n",
+                   adcCount, adcCount, adcVoltageS, vBatS, percent);
   Serial.println(output);
   digitalWrite(VBAT_ENABLE, HIGH);
 }
@@ -134,8 +134,10 @@ int dR = 2;
 int dG = -2;
 int dB = 1;
 
-// the loop function runs over and over again forever
-void loop() {
+int lastBatteryUpdate = 0;
+
+void shiftColors() {
+ 
   R = R + dR;
   G = G + dG;
   B = B + dB;
@@ -149,42 +151,18 @@ void loop() {
   analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[abs(R)]));
   analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[abs(G)]));
   analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[abs(B)]));
+}
+
+// the loop function runs over and over again forever
+void loop() {
+  shiftColors();
   delay(10);
 
-  /*
-  for (int brightness = 100; brightness >= 0; brightness--) {
-    analogWrite(LED_R, (100 - brightness) * 255 / 100);
-    delay(10);
-    /*
-    for (int repeat = 0; repeat < 100; repeat++) {
-    digitalWrite(LED_BUILTIN, LOW);   // turn the LED on
-    delayMicroseconds(brightness);
-    digitalWrite(LED_BUILTIN, HIGH);    // turn the LED off
-    delayMicroseconds(100 - brightness);
-    }
+  if (millis() / 1000 > lastBatteryUpdate) {
+    lastBatteryUpdate = millis() / 1000;
+    Serial.println(counter++);
+    battery();
   }
-    */
-    /*
-  for (int brightness = 0; brightness < 100; brightness++) {
-    analogWrite(LED_BUILTIN, (100 - brightness) * 255 / 100);
-//    delayMicroseconds(100*100);
-    delay(10);
-    /*
-    for (int repeat = 0; repeat < 100; repeat++) {
-    digitalWrite(LED_BUILTIN, LOW);   // turn the LED on
-    delayMicroseconds(brightness);
-    digitalWrite(LED_BUILTIN, HIGH);    // turn the LED off
-    delayMicroseconds(100 - brightness);
-    }
-  }
-    */
-//  delay(1000);                       // wait for a second
-//  digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
-//  delay(1000);                       // wait for a second
-if (B == 0) {
-  Serial.println(counter++);
-  battery();
-}
 }
 
 
