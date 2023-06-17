@@ -33,6 +33,8 @@ uint8_t connection_count = 0;
 
 BLEService lbsBatteryService(UUID16_SVC_BATTERY);
 BLECharacteristic lbsBatteryAttr(UUID16_CHR_BATTERY_LEVEL);
+BLEService lbsLedService("19B10000-E8F2-537E-4F6C-D104768A1214");
+BLECharacteristic lbsLedSwitchCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214");
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -64,6 +66,14 @@ void setup() {
   lbsBatteryAttr.begin();
   lbsBatteryAttr.write8(0);
 
+  lbsLedService.begin();
+  lbsLedSwitchCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
+  lbsLedSwitchCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  lbsLedSwitchCharacteristic.setFixedLen(1);
+  lbsLedSwitchCharacteristic.begin();
+  lbsLedSwitchCharacteristic.write8(1);
+  lbsLedSwitchCharacteristic.setWriteCallback(switch_write_callback);
+  
   startBleAdv();
 }
 
@@ -78,6 +88,7 @@ void startBleAdv(void)
 
   // Include Service UUID
   Bluefruit.Advertising.addService(lbsBatteryService);
+  Bluefruit.Advertising.addService(lbsLedService);
 
   // Secondary Scan Response packet (optional)
   // Since there is no room for 'Name' in Advertising packet
@@ -127,6 +138,7 @@ void battery() {
   digitalWrite(VBAT_ENABLE, HIGH);
 }
 
+bool isLedOn = true;
 int R = -255;
 int G = 0;
 int B = 0;
@@ -147,16 +159,26 @@ void shiftColors() {
   if (R < -255) R = 255;
   if (G < -255) G = 255;
   if (B < -255) B = 255;
-  
-  analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[abs(R)]));
-  analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[abs(G)]));
-  analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[abs(B)]));
+
+  if (isLedOn) {
+    analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[abs(R)]));
+    analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[abs(G)]));
+    analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[abs(B)]));
+  } else {
+    analogWrite(LED_RED, 255);
+    analogWrite(LED_GREEN, 255);
+    analogWrite(LED_BLUE, 255);
+  }
 }
 
 // the loop function runs over and over again forever
 void loop() {
   shiftColors();
-  delay(10);
+  if (isLedOn) {
+    delay(10);
+  } else {
+    delay(250);
+  }
 
   if (millis() / 1000 > lastBatteryUpdate) {
     lastBatteryUpdate = millis() / 1000;
@@ -181,6 +203,17 @@ void connect_callback(uint16_t conn_handle)
     Serial.println("Keep advertising");
     Bluefruit.Advertising.start(0);
   }
+}
+
+void switch_write_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+  // data = 1 -> On
+  // data = 0 -> Off
+  isLedOn = data[0] != 0;
+  
+  char output[32];
+  sprintf(output, "switch command: 0x%02X\n",
+                   data[0]);
+  Serial.println(output);
 }
 
 /**
