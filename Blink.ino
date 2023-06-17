@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <bluefruit.h>
 #include <avr/dtostrf.h>
+#include <FastLED.h>
 
 // https://learn.adafruit.com/led-tricks-gamma-correction/the-quick-fix
 const uint8_t PROGMEM gamma8[] = {
@@ -35,6 +36,7 @@ BLEService lbsBatteryService(UUID16_SVC_BATTERY);
 BLECharacteristic lbsBatteryAttr(UUID16_CHR_BATTERY_LEVEL);
 BLEService lbsLedService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic lbsLedSwitchCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214");
+BLECharacteristic lbsLedHueCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214");
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -73,6 +75,12 @@ void setup() {
   lbsLedSwitchCharacteristic.begin();
   lbsLedSwitchCharacteristic.write8(1);
   lbsLedSwitchCharacteristic.setWriteCallback(switch_write_callback);
+  lbsLedHueCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
+  lbsLedHueCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  lbsLedHueCharacteristic.setFixedLen(1);
+  lbsLedHueCharacteristic.begin();
+  lbsLedHueCharacteristic.write8(0);
+  lbsLedHueCharacteristic.setWriteCallback(hue_write_callback);
   
   startBleAdv();
 }
@@ -139,31 +147,23 @@ void battery() {
 }
 
 bool isLedOn = true;
-int R = -255;
-int G = 0;
-int B = 0;
-int dR = 2;
-int dG = -2;
-int dB = 1;
-
+CHSV color = CHSV(0, 255, 255);
+int freezeLEDUntil = 0;
 int lastBatteryUpdate = 0;
 
 void shiftColors() {
- 
-  R = R + dR;
-  G = G + dG;
-  B = B + dB;
-  if (R > 255) R = -255;
-  if (G > 255) G = -255;
-  if (B > 255) B = -255;
-  if (R < -255) R = 255;
-  if (G < -255) G = 255;
-  if (B < -255) B = 255;
+  if (millis() > freezeLEDUntil) {
+    color.setHSV(color.h+1, color.s, color.v);
+    lbsLedHueCharacteristic.write8(color.h);
+    lbsLedHueCharacteristic.notify8(color.h);
+   
+  }
 
   if (isLedOn) {
-    analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[abs(R)]));
-    analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[abs(G)]));
-    analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[abs(B)]));
+    CRGB outputColor = color;
+    analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[outputColor.r]));
+    analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[outputColor.g]));
+    analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[outputColor.b]));
   } else {
     analogWrite(LED_RED, 255);
     analogWrite(LED_GREEN, 255);
@@ -175,7 +175,7 @@ void shiftColors() {
 void loop() {
   shiftColors();
   if (isLedOn) {
-    delay(10);
+    delay(50);
   } else {
     delay(250);
   }
@@ -208,12 +208,25 @@ void connect_callback(uint16_t conn_handle)
 void switch_write_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
   // data = 1 -> On
   // data = 0 -> Off
-  isLedOn = data[0] != 0;
-  
-  char output[32];
-  sprintf(output, "switch command: 0x%02X\n",
-                   data[0]);
-  Serial.println(output);
+  if (len >= 1) {
+    isLedOn = data[0] != 0;
+    
+    char output[32];
+    sprintf(output, "switch command: 0x%02X\n",
+                     data[0]);
+    Serial.println(output);
+  }
+}
+void hue_write_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
+  if (len >= 1) {
+    color.h = data[0];
+    freezeLEDUntil = millis() + 10000;
+    
+    char output[32];
+    sprintf(output, "hue command: %03u\n",
+                     data[0]);
+    Serial.println(output);
+  }
 }
 
 /**
