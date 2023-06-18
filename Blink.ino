@@ -9,28 +9,18 @@
 #include <avr/dtostrf.h>
 #include <FastLED.h>
 
-// https://learn.adafruit.com/led-tricks-gamma-correction/the-quick-fix
-const uint8_t PROGMEM gamma8[] = {
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,
-    1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  2,  2,
-    2,  3,  3,  3,  3,  3,  3,  3,  4,  4,  4,  4,  4,  5,  5,  5,
-    5,  6,  6,  6,  6,  7,  7,  7,  7,  8,  8,  8,  9,  9,  9, 10,
-   10, 10, 11, 11, 11, 12, 12, 13, 13, 13, 14, 14, 15, 15, 16, 16,
-   17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22, 23, 24, 24, 25,
-   25, 26, 27, 27, 28, 29, 29, 30, 31, 32, 32, 33, 34, 35, 35, 36,
-   37, 38, 39, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 50,
-   51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 66, 67, 68,
-   69, 70, 72, 73, 74, 75, 77, 78, 79, 81, 82, 83, 85, 86, 87, 89,
-   90, 92, 93, 95, 96, 98, 99,101,102,104,105,107,109,110,112,114,
-  115,117,119,120,122,124,126,127,129,131,133,135,137,138,140,142,
-  144,146,148,150,152,154,156,158,160,162,164,167,169,171,173,175,
-  177,180,182,184,186,189,191,193,196,198,200,203,205,208,210,213,
-  215,218,220,223,225,228,231,233,236,239,241,244,247,249,252,255 };
+// Use Seeed nrf52 platform 1.1.1 or:
+// Add the Seeed LSM6DS3 library
+// and then edit ~/Arduino/libraries/Seeed_Arduino_LSM6DS3/LSM6DS3.cpp to force-enable the #define Wire Wire1
+// https://forum.seeedstudio.com/t/how-to-access-wire1-with-bluefruit-library/266295/9
+#include <LSM6DS3.h>
+
+//Create a instance of class LSM6DS3
+LSM6DS3 myIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 
 #define MAX_PRPH_CONNECTION   2
 uint8_t connection_count = 0;
-
+int imuSuccess = 0;
 
 BLEService lbsBatteryService(UUID16_SVC_BATTERY);
 BLECharacteristic lbsBatteryAttr(UUID16_CHR_BATTERY_LEVEL);
@@ -83,6 +73,14 @@ void setup() {
   lbsLedHueCharacteristic.setWriteCallback(hue_write_callback);
   
   startBleAdv();
+  
+  //Call .begin() to configure the IMUs
+  imuSuccess = myIMU.begin();
+  if (imuSuccess != 0) {
+      Serial.println("Device error");
+  } else {
+      Serial.println("Device OK!");
+  }
 }
 
 void startBleAdv(void)
@@ -123,6 +121,30 @@ uint32_t counter = 100;
 const double vRef = 3.3; // Assumes 3.3V regulator output is ADC reference voltage
 const unsigned int numReadings = 1024; // 10-bit ADC readings 0-1023, so the factor is 1024
 
+bool isLedOn = true;
+CHSV color = CHSV(0, 255, 128);
+int freezeLEDUntil = 0;
+int lastBatteryUpdate = 0;
+
+void shiftColors() {
+  if (false && millis() > freezeLEDUntil) {
+    color.setHSV(color.h+1, color.s, color.v);
+    lbsLedHueCharacteristic.write8(color.h);
+    lbsLedHueCharacteristic.notify8(color.h);
+  }
+
+  if (isLedOn) {
+    CRGB outputColor = color;
+    analogWrite(LED_RED, 255 - outputColor.r);
+    analogWrite(LED_GREEN, 255 - outputColor.g);
+    analogWrite(LED_BLUE, 255 - outputColor.b);
+  } else {
+    analogWrite(LED_RED, 255);
+    analogWrite(LED_GREEN, 255);
+    analogWrite(LED_BLUE, 255);
+  }
+}
+
 void battery() {
   // https://forum.seeedstudio.com/t/xiao-ble-sense-battery-level-and-charging-status/263248/54
   // https://github.com/honvl/Seeed-Xiao-NRF52840-Battery/blob/main/xiaobattery.h
@@ -146,33 +168,106 @@ void battery() {
   digitalWrite(VBAT_ENABLE, HIGH);
 }
 
-bool isLedOn = true;
-CHSV color = CHSV(0, 255, 255);
-int freezeLEDUntil = 0;
-int lastBatteryUpdate = 0;
-
-void shiftColors() {
-  if (millis() > freezeLEDUntil) {
-    color.setHSV(color.h+1, color.s, color.v);
-    lbsLedHueCharacteristic.write8(color.h);
-    lbsLedHueCharacteristic.notify8(color.h);
-   
+void imuColor() {
+  if (millis() < freezeLEDUntil) {
+    // set manually over Bluetooth, don't change color
+    return;
   }
+  
+  // https://www.hobbytronics.co.uk/accelerometer-info
+  float x_val = myIMU.readFloatAccelX();
+  float y_val = myIMU.readFloatAccelY();
+  float z_val = myIMU.readFloatAccelZ();
 
-  if (isLedOn) {
-    CRGB outputColor = color;
-    analogWrite(LED_RED, 255 - pgm_read_byte(&gamma8[outputColor.r]));
-    analogWrite(LED_GREEN, 255 - pgm_read_byte(&gamma8[outputColor.g]));
-    analogWrite(LED_BLUE, 255 - pgm_read_byte(&gamma8[outputColor.b]));
+  float x2 = x_val * x_val;
+  float y2 = y_val * y_val;
+  float z2 = z_val * z_val;
+  
+  // Roll Axis
+  float result;
+  result=sqrt(x2+z2);
+  result=y_val/result;
+  float accel_rad_y = atan(result);
+  float accel_angle_y = accel_rad_y * 180/PI;
+  int hue = accel_angle_y * (2 * 256) / 360 + 2 * 256;
+  color.setHSV(hue, color.s, color.v);
+  lbsLedHueCharacteristic.write8(color.h);
+  lbsLedHueCharacteristic.notify8(color.h);
+}
+
+void reportIMU() {
+  
+  if (imuSuccess != 0) {
+      Serial.print("Device error: ");
+      Serial.println(imuSuccess);
   } else {
-    analogWrite(LED_RED, 255);
-    analogWrite(LED_GREEN, 255);
-    analogWrite(LED_BLUE, 255);
+      Serial.println("Device OK!");
   }
+
+  // https://how2electronics.com/using-imu-microphone-on-xiao-ble-nrf52840-sense/
+  float x_val = myIMU.readFloatAccelX();
+  float y_val = myIMU.readFloatAccelY();
+  float z_val = myIMU.readFloatAccelZ();
+  //Accelerometer
+  Serial.print("\nAccelerometer:\n");
+  Serial.print(" X1 = ");
+  Serial.println(x_val, 4);
+  Serial.print(" Y1 = ");
+  Serial.println(y_val, 4);
+  Serial.print(" Z1 = ");
+  Serial.println(z_val, 4);
+
+  // https://www.hobbytronics.co.uk/accelerometer-info
+  float x2 = x_val * x_val;
+  float y2 = y_val * y_val;
+  float z2 = z_val * z_val;
+
+  float result;
+  //X Axis
+  result=sqrt(y2+z2);
+  result=x_val/result;
+  float accel_rad_x = atan(result);
+  float accel_angle_x = accel_rad_x * 180/PI;
+
+  //Y Axis
+  result=sqrt(x2+z2);
+  result=y_val/result;
+  float accel_rad_y = atan(result);
+  float accel_angle_y = accel_rad_y * 180/PI;
+  
+  //Z Axis
+  result=sqrt(x2+y2);
+  result=z_val/result;
+  float accel_rad_z = atan(result);
+  float accel_angle_z = accel_rad_z * 180/PI;
+  
+  Serial.print(" Roll = ");
+  Serial.println(accel_angle_y, 4);
+  Serial.print(" Pitch = ");
+  Serial.println(accel_angle_x, 4);
+  Serial.print(" Yaw = ");
+  Serial.println(accel_angle_z, 4);
+  
+  //Gyroscope
+  Serial.print("\nGyroscope:\n");
+  Serial.print(" X1 = ");
+  Serial.println(myIMU.readFloatGyroX(), 4);
+  Serial.print(" Y1 = ");
+  Serial.println(myIMU.readFloatGyroY(), 4);
+  Serial.print(" Z1 = ");
+  Serial.println(myIMU.readFloatGyroZ(), 4);
+
+  //Thermometer
+  Serial.print("\nThermometer:\n");
+  Serial.print(" Degrees C1 = ");
+  Serial.println(myIMU.readTempC(), 4);
+  Serial.print(" Degrees F1 = ");
+  Serial.println(myIMU.readTempF(), 4);
 }
 
 // the loop function runs over and over again forever
 void loop() {
+  imuColor();
   shiftColors();
   if (isLedOn) {
     delay(50);
@@ -184,6 +279,7 @@ void loop() {
     lastBatteryUpdate = millis() / 1000;
     Serial.println(counter++);
     battery();
+    reportIMU();
   }
 }
 
