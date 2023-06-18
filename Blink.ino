@@ -52,6 +52,8 @@ void setup() {
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
   
   lbsBatteryService.begin();
+  lbsBatteryAttr.setUserDescriptor("Battery Level");
+  lbsBatteryAttr.setPresentationFormatDescriptor(BLE_GATT_CPF_FORMAT_UINT8, 0, UUID16_UNIT_PERCENTAGE, 0, 0);
   lbsBatteryAttr.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
   lbsBatteryAttr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
   lbsBatteryAttr.setFixedLen(1);
@@ -59,12 +61,16 @@ void setup() {
   lbsBatteryAttr.write8(0);
 
   lbsLedService.begin();
+  lbsLedSwitchCharacteristic.setUserDescriptor("Switch");
+  lbsLedSwitchCharacteristic.setPresentationFormatDescriptor(BLE_GATT_CPF_FORMAT_BOOLEAN, 0, UUID16_UNIT_UNITLESS, 0, 0);
   lbsLedSwitchCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
   lbsLedSwitchCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
   lbsLedSwitchCharacteristic.setFixedLen(1);
   lbsLedSwitchCharacteristic.begin();
   lbsLedSwitchCharacteristic.write8(1);
   lbsLedSwitchCharacteristic.setWriteCallback(switch_write_callback);
+  lbsLedHueCharacteristic.setUserDescriptor("Hue");
+  lbsLedHueCharacteristic.setPresentationFormatDescriptor(BLE_GATT_CPF_FORMAT_UINT8, 0, UUID16_UNIT_PLANE_ANGLE_DEGREE, 0, 0);
   lbsLedHueCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
   lbsLedHueCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
   lbsLedHueCharacteristic.setFixedLen(1);
