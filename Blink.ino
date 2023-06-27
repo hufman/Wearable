@@ -20,13 +20,15 @@ LSM6DS3 myIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 
 #define MAX_PRPH_CONNECTION   2
 uint8_t connection_count = 0;
-int imuSuccess = 0;
+int imuSuccess = 1;
 
+BLEDis bledis;
 BLEService lbsBatteryService(UUID16_SVC_BATTERY);
 BLECharacteristic lbsBatteryAttr(UUID16_CHR_BATTERY_LEVEL);
 BLEService lbsLedService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic lbsLedSwitchCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic lbsLedHueCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214");
+BLEHidAdafruit blehid;
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -50,6 +52,13 @@ void setup() {
   Bluefruit.begin(MAX_PRPH_CONNECTION, 0);
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
+  
+  // Configure and Start Device Information Service
+  bledis.setManufacturer("ChezChat");
+  bledis.setModel("Bangle");
+  bledis.begin();
+  
+  blehid.begin();
   
   lbsBatteryService.begin();
   lbsBatteryAttr.setUserDescriptor("Battery Level");
@@ -81,6 +90,7 @@ void setup() {
   startBleAdv();
   
   //Call .begin() to configure the IMUs
+  myIMU.settings.gyroEnabled = 0;
   imuSuccess = myIMU.begin();
   if (imuSuccess != 0) {
       Serial.println("Device error");
@@ -104,6 +114,7 @@ void startBleAdv(void)
 
   // Secondary Scan Response packet (optional)
   // Since there is no room for 'Name' in Advertising packet
+  Bluefruit.Advertising.addService(blehid);
   
   /* Start Advertising
    * - Enable auto advertising if disconnected
@@ -116,10 +127,11 @@ void startBleAdv(void)
    */
   Bluefruit.Advertising.restartOnDisconnect(true);
   Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
-  Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
-  
+  Bluefruit.Advertising.setInterval(32, 1636);    // in unit of 0.625 ms
+  Bluefruit.Advertising.setFastTimeout(0);      // number of seconds in fast mode
+  Bluefruit.setName("Bangle");
   Bluefruit.ScanResponse.addName();
-  Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds  
+  Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds  5
 }
 
 uint32_t counter = 100;
@@ -133,7 +145,7 @@ int freezeLEDUntil = 0;
 int lastBatteryUpdate = 0;
 
 void shiftColors() {
-  if (false && millis() > freezeLEDUntil) {
+  if (millis() > freezeLEDUntil) {
     color.setHSV(color.h+1, color.s, color.v);
     lbsLedHueCharacteristic.write8(color.h);
     lbsLedHueCharacteristic.notify8(color.h);
@@ -159,7 +171,7 @@ void battery() {
   double adcVoltage = (adcCount * vRef) / numReadings;
   double vBat = adcVoltage*1510.0/510.0; // Voltage divider from Vbat to ADC
   
-  uint8_t percent = (vBat - 3.3) / (4.2 - 3.3) * 100;
+  uint8_t percent = (vBat - 3.3) / (3.85 - 3.3) * 100;
   lbsBatteryAttr.write8(percent);
 
   char adcVoltageS[16];
@@ -174,6 +186,7 @@ void battery() {
   digitalWrite(VBAT_ENABLE, HIGH);
 }
 
+float previousAngle = -5000;
 void imuColor() {
   if (millis() < freezeLEDUntil) {
     // set manually over Bluetooth, don't change color
@@ -192,13 +205,38 @@ void imuColor() {
   // Roll Axis
   float result;
   result=sqrt(x2+z2);
-  result=y_val/result;
-  float accel_rad_y = atan(result);
+//  result=y_val/result;
+//  float accel_rad_y = atan2(y_val, result);
+  float accel_rad_y = atan2(y_val, z_val);
   float accel_angle_y = accel_rad_y * 180/PI;
+  
   int hue = accel_angle_y * (2 * 256) / 360 + 2 * 256;
   color.setHSV(hue, color.s, color.v);
   lbsLedHueCharacteristic.write8(color.h);
   lbsLedHueCharacteristic.notify8(color.h);
+
+  // volume control by tilt
+  if (accel_angle_y > 128) accel_angle_y -= 360;
+  if (previousAngle < -4000) previousAngle = accel_angle_y;
+  float angle_moved = previousAngle - accel_angle_y;
+  if (abs(angle_moved) > 128) angle_moved = 0;
+  int notches = angle_moved / 10;
+  for (int i = 0; i < abs(notches); i++) {
+    if (notches < 0) {
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT);
+    } else {
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_DECREMENT);
+    }
+    delay(5);
+    blehid.consumerKeyRelease();
+    previousAngle = accel_angle_y;
+  }
+}
+
+float copysign(float base, float mod1, float mod2) {
+  if (mod1 < 0) base *= -1;
+  if (mod2 < 0) base *= -1;
+  return base;
 }
 
 void reportIMU() {
@@ -231,20 +269,24 @@ void reportIMU() {
   float result;
   //X Axis
   result=sqrt(y2+z2);
-  result=x_val/result;
-  float accel_rad_x = atan(result);
+//  result=copysign(result, y_val, z_val);
+//  result=x_val/result;
+  float accel_rad_x = atan2(x_val, result);
   float accel_angle_x = accel_rad_x * 180/PI;
 
   //Y Axis
   result=sqrt(x2+z2);
-  result=y_val/result;
-  float accel_rad_y = atan(result);
+  result=copysign(result, x_val, z_val);
+//  result=y_val/result;
+//  float accel_rad_y = atan2(y_val, result);
+  float accel_rad_y = atan2(y_val, z_val);
   float accel_angle_y = accel_rad_y * 180/PI;
   
   //Z Axis
   result=sqrt(x2+y2);
-  result=z_val/result;
-  float accel_rad_z = atan(result);
+//  result=copysign(result, x_val, y_val);
+//  result=z_val/result;
+  float accel_rad_z = atan2(z_val, result);
   float accel_angle_z = accel_rad_z * 180/PI;
   
   Serial.print(" Roll = ");
@@ -286,6 +328,14 @@ void loop() {
     Serial.println(counter++);
     battery();
     reportIMU();
+
+    /*
+    if (counter % 10 > 5) {
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT);
+    } else {
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_DECREMENT);
+    }
+    */
   }
 }
 
