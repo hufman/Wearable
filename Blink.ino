@@ -97,6 +97,9 @@ void setup() {
   } else {
       Serial.println("Device OK!");
   }
+
+  // haptic
+  drvInit();
 }
 
 void startBleAdv(void)
@@ -221,6 +224,10 @@ void imuColor() {
   float angle_moved = previousAngle - accel_angle_y;
   if (abs(angle_moved) > 128) angle_moved = 0;
   int notches = angle_moved / 10;
+  
+  if (abs(notches) > 0) {
+   drvTrigger(26);
+  }
   for (int i = 0; i < abs(notches); i++) {
     if (notches < 0) {
       blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT);
@@ -313,6 +320,7 @@ void reportIMU() {
   Serial.println(myIMU.readTempF(), 4);
 }
 
+int effect = 0;
 // the loop function runs over and over again forever
 void loop() {
   imuColor();
@@ -329,6 +337,10 @@ void loop() {
     battery();
     reportIMU();
 
+    // haptic test
+    drvIdle();
+//    drvTrigger(effect++);
+//    if (effect > 123) effect = 0;
     /*
     if (counter % 10 > 5) {
       blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT);
@@ -338,7 +350,6 @@ void loop() {
     */
   }
 }
-
 
 // callback invoked when central connects
 void connect_callback(uint16_t conn_handle)
