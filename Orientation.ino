@@ -8,11 +8,16 @@
 // and then edit ~/Arduino/libraries/Seeed_Arduino_LSM6DS3/LSM6DS3.cpp to force-enable the #define Wire Wire1
 // https://forum.seeedstudio.com/t/how-to-access-wire1-with-bluefruit-library/266295/9
 #include <LSM6DS3.h>
+#include <MadgwickAHRS.h>
 
 //Create a instance of class LSM6DS3
 LSM6DS3 myIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
-
 int imuSuccess = 1;
+
+// Madgwick orientation
+Madgwick madgwickFilter;
+long madgwickPrevious = 0;
+int madgwickInterval = 0;
 
 void imuInit() {
 
@@ -24,10 +29,14 @@ void imuInit() {
   } else {
       Serial.println("Device OK!");
   }
+
+  madgwickPrevious = micros();
+  madgwickInterval = (int)(1000000 / 20);
+  madgwickFilter.begin(20);
 }
 
-LSM6DS3 imuGet() {
-    return myIMU;
+Madgwick madgwickGet() {
+    return madgwickFilter;
 }
 
 class GyroCalibration {
@@ -176,6 +185,13 @@ void reportIMU() {
   Serial.print(" Z1 = ");
   Serial.println(gz, 4);
 
+  Serial.print("Orientation: ");
+  Serial.print(madgwickFilter.getYaw());
+  Serial.print(" ");
+  Serial.print(madgwickFilter.getPitch());
+  Serial.print(" ");
+  Serial.println(madgwickFilter.getRoll());
+
   //Thermometer
   Serial.print("\nThermometer:\n");
   Serial.print(" Degrees C1 = ");
@@ -184,3 +200,18 @@ void reportIMU() {
   Serial.println(myIMU.readTempF(), 4);
 }
 
+void imuUpdate() {
+  if (madgwickPrevious + madgwickInterval < micros()) {
+    float ax = myIMU.readFloatAccelX();
+    float ay = myIMU.readFloatAccelY();
+    float az = myIMU.readFloatAccelZ();
+    float gx = myIMU.readFloatGyroX();
+    float gy = myIMU.readFloatGyroY();
+    float gz = myIMU.readFloatGyroZ();
+    gyroCalibration.adjust(&gx, &gy, &gz);
+    madgwickFilter.updateIMU(gx, gy, gz, ax, ay, az);
+
+    madgwickPrevious += madgwickInterval;
+  }
+  if (madgwickPrevious > micros()) madgwickPrevious = micros();
+};

@@ -8,7 +8,7 @@
 #include <bluefruit.h>
 #include <avr/dtostrf.h>
 #include <FastLED.h>
-#include <LSM6DS3.h>
+#include <MadgwickAHRS.h>
 
 #define MAX_PRPH_CONNECTION   2
 uint8_t connection_count = 0;
@@ -180,33 +180,17 @@ void imuColor() {
     return;
   }
   
-  // https://www.hobbytronics.co.uk/accelerometer-info
-  LSM6DS3 myIMU = imuGet();
-  float x_val = myIMU.readFloatAccelX();
-  float y_val = myIMU.readFloatAccelY();
-  float z_val = myIMU.readFloatAccelZ();
-
-  float x2 = x_val * x_val;
-  float y2 = y_val * y_val;
-  float z2 = z_val * z_val;
-  
-  // Roll Axis
-  float result;
-  result=sqrt(x2+z2);
-//  result=y_val/result;
-//  float accel_rad_y = atan2(y_val, result);
-  float accel_rad_y = atan2(y_val, z_val);
-  float accel_angle_y = accel_rad_y * 180/PI;
-  
-  int hue = accel_angle_y * (2 * 256) / 360 + 2 * 256;
+  Madgwick orientation = madgwickGet();
+  int hue = orientation.getRoll() * (2 * 256) / 360 + 2 * 256;
   color.setHSV(hue, color.s, color.v);
   lbsLedHueCharacteristic.write8(color.h);
   lbsLedHueCharacteristic.notify8(color.h);
 
   // volume control by tilt
-  if (accel_angle_y > 128) accel_angle_y -= 360;
-  if (previousAngle < -4000) previousAngle = accel_angle_y;
-  float angle_moved = previousAngle - accel_angle_y;
+  int roll = orientation.getRoll();
+  if (roll > 128) roll -= 360;
+  if (previousAngle < -4000) previousAngle = roll;
+  float angle_moved = previousAngle - roll;
   if (abs(angle_moved) > 128) angle_moved = 0;
   int notches = angle_moved / 10;
   
@@ -221,7 +205,7 @@ void imuColor() {
     }
     delay(5);
     blehid.consumerKeyRelease();
-    previousAngle = accel_angle_y;
+    previousAngle = roll;
   }
 }
 
@@ -229,6 +213,7 @@ void imuColor() {
 int effect = 0;
 // the loop function runs over and over again forever
 void loop() {
+  imuUpdate();
   imuColor();
   shiftColors();
   if (isLedOn) {
