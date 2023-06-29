@@ -8,19 +8,10 @@
 #include <bluefruit.h>
 #include <avr/dtostrf.h>
 #include <FastLED.h>
-
-// Use Seeed nrf52 platform 1.1.1 or:
-// Add the Seeed LSM6DS3 library
-// and then edit ~/Arduino/libraries/Seeed_Arduino_LSM6DS3/LSM6DS3.cpp to force-enable the #define Wire Wire1
-// https://forum.seeedstudio.com/t/how-to-access-wire1-with-bluefruit-library/266295/9
 #include <LSM6DS3.h>
-
-//Create a instance of class LSM6DS3
-LSM6DS3 myIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 
 #define MAX_PRPH_CONNECTION   2
 uint8_t connection_count = 0;
-int imuSuccess = 1;
 
 BLEDis bledis;
 BLEService lbsBatteryService(UUID16_SVC_BATTERY);
@@ -88,17 +79,10 @@ void setup() {
   lbsLedHueCharacteristic.setWriteCallback(hue_write_callback);
   
   startBleAdv();
-  
-  //Call .begin() to configure the IMUs
-  myIMU.settings.gyroEnabled = 0;
-  imuSuccess = myIMU.begin();
-  if (imuSuccess != 0) {
-      Serial.println("Device error");
-  } else {
-      Serial.println("Device OK!");
-  }
 
-  // haptic
+  // imu
+  imuInit();
+  // haptic 
   drvInit();
 }
 
@@ -197,6 +181,7 @@ void imuColor() {
   }
   
   // https://www.hobbytronics.co.uk/accelerometer-info
+  LSM6DS3 myIMU = imuGet();
   float x_val = myIMU.readFloatAccelX();
   float y_val = myIMU.readFloatAccelY();
   float z_val = myIMU.readFloatAccelZ();
@@ -240,85 +225,6 @@ void imuColor() {
   }
 }
 
-float copysign(float base, float mod1, float mod2) {
-  if (mod1 < 0) base *= -1;
-  if (mod2 < 0) base *= -1;
-  return base;
-}
-
-void reportIMU() {
-  
-  if (imuSuccess != 0) {
-      Serial.print("Device error: ");
-      Serial.println(imuSuccess);
-  } else {
-      Serial.println("Device OK!");
-  }
-
-  // https://how2electronics.com/using-imu-microphone-on-xiao-ble-nrf52840-sense/
-  float x_val = myIMU.readFloatAccelX();
-  float y_val = myIMU.readFloatAccelY();
-  float z_val = myIMU.readFloatAccelZ();
-  //Accelerometer
-  Serial.print("\nAccelerometer:\n");
-  Serial.print(" X1 = ");
-  Serial.println(x_val, 4);
-  Serial.print(" Y1 = ");
-  Serial.println(y_val, 4);
-  Serial.print(" Z1 = ");
-  Serial.println(z_val, 4);
-
-  // https://www.hobbytronics.co.uk/accelerometer-info
-  float x2 = x_val * x_val;
-  float y2 = y_val * y_val;
-  float z2 = z_val * z_val;
-
-  float result;
-  //X Axis
-  result=sqrt(y2+z2);
-//  result=copysign(result, y_val, z_val);
-//  result=x_val/result;
-  float accel_rad_x = atan2(x_val, result);
-  float accel_angle_x = accel_rad_x * 180/PI;
-
-  //Y Axis
-  result=sqrt(x2+z2);
-  result=copysign(result, x_val, z_val);
-//  result=y_val/result;
-//  float accel_rad_y = atan2(y_val, result);
-  float accel_rad_y = atan2(y_val, z_val);
-  float accel_angle_y = accel_rad_y * 180/PI;
-  
-  //Z Axis
-  result=sqrt(x2+y2);
-//  result=copysign(result, x_val, y_val);
-//  result=z_val/result;
-  float accel_rad_z = atan2(z_val, result);
-  float accel_angle_z = accel_rad_z * 180/PI;
-  
-  Serial.print(" Roll = ");
-  Serial.println(accel_angle_y, 4);
-  Serial.print(" Pitch = ");
-  Serial.println(accel_angle_x, 4);
-  Serial.print(" Yaw = ");
-  Serial.println(accel_angle_z, 4);
-  
-  //Gyroscope
-  Serial.print("\nGyroscope:\n");
-  Serial.print(" X1 = ");
-  Serial.println(myIMU.readFloatGyroX(), 4);
-  Serial.print(" Y1 = ");
-  Serial.println(myIMU.readFloatGyroY(), 4);
-  Serial.print(" Z1 = ");
-  Serial.println(myIMU.readFloatGyroZ(), 4);
-
-  //Thermometer
-  Serial.print("\nThermometer:\n");
-  Serial.print(" Degrees C1 = ");
-  Serial.println(myIMU.readTempC(), 4);
-  Serial.print(" Degrees F1 = ");
-  Serial.println(myIMU.readTempF(), 4);
-}
 
 int effect = 0;
 // the loop function runs over and over again forever
