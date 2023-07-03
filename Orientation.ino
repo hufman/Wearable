@@ -107,6 +107,68 @@ void GyroCalibration::adjust(float* gx, float* gy, float* gz) {
 
 GyroCalibration gyroCalibration;
 
+class AccelerationTracker {
+public:
+    AccelerationTracker(Madgwick* adjustment);
+    void update(float ax, float ay, float az);
+    void reset();
+    long lastUpdate = 0;
+    long lastReport = 0;
+    float vx = 0;
+    float vy = 0;
+    float vz = 0;
+    float x = 0;
+    float y = 0;
+    float z = 0;
+private:
+    Madgwick* madgwick;
+};
+
+AccelerationTracker::AccelerationTracker(Madgwick* adjustment) {
+    madgwick = adjustment;
+}
+void AccelerationTracker::update(float ax, float ay, float az) {
+    /** Transform the given acceleration values to translations */
+    float tx = cos(madgwick->getPitchRadians()) * ax + sin(madgwick->getPitchRadians()) * az;
+    float ty = cos(madgwick->getRollRadians()) * ay + sin(madgwick->getRollRadians()) * az;
+//    float tz = (-sin(madgwick->getRollRadians()) * ay + cos(madgwick->getRollRadians()) * az) / 2 +
+//               (-sin(madgwick->getPitchRadians()) * ax + cos(madgwick->getPitchRadians()) * az) / 2;
+    float offAxisProportion = abs(sin(madgwick->getRollRadians())) + abs(sin(madgwick->getPitchRadians()));
+    float distance = sqrt(madgwick->getRollRadians()*madgwick->getRollRadians() + madgwick->getPitchRadians()*madgwick->getPitchRadians());
+    float tz = -sin(madgwick->getRollRadians()) * ay + sin(madgwick->getPitchRadians()) * ax
+//               + offAxisProportion * az;
+               - cos(distance) * az + .988;
+    if (lastReport + 1000000 < micros()) {
+        Serial.print("\nAdjusted Accelerometer:\n");
+        Serial.print(" X1 = ");
+        Serial.println(tx, 4);
+        Serial.print(" Y1 = ");
+        Serial.println(ty, 4);
+        Serial.print(" Z1 = ");
+        Serial.println(tz, 4);
+        Serial.print(" sin(roll) = ");
+        Serial.println(sin(madgwick->getRollRadians()), 2);
+        Serial.print(" cos(roll) = ");
+        Serial.println(cos(madgwick->getRollRadians()), 2);
+
+        lastReport = micros();
+    }
+    
+    if (lastUpdate > 0) {
+        long dt = micros() - lastUpdate;
+        // move position based on velocity
+    }
+    lastUpdate = micros();
+}
+void AccelerationTracker::reset() {
+    x = 0;
+    y = 0;
+    z = 0;
+}
+
+AccelerationTracker tracker = AccelerationTracker(&madgwickFilter);
+
+
 float copysign(float base, float mod1, float mod2) {
   if (mod1 < 0) base *= -1;
   if (mod2 < 0) base *= -1;
@@ -121,7 +183,7 @@ void reportIMU() {
   } else {
       Serial.println("Device OK!");
   }
-
+  
   // https://how2electronics.com/using-imu-microphone-on-xiao-ble-nrf52840-sense/
   float x_val = myIMU.readFloatAccelX();
   float y_val = myIMU.readFloatAccelY();
@@ -210,6 +272,7 @@ void imuUpdate() {
     float gz = myIMU.readFloatGyroZ();
     gyroCalibration.adjust(&gx, &gy, &gz);
     madgwickFilter.updateIMU(gx, gy, gz, ax, ay, az);
+    tracker.update(ax, ay, az);
 
     madgwickPrevious += madgwickInterval;
   }
