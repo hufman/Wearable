@@ -130,37 +130,75 @@ AccelerationTracker::AccelerationTracker(Madgwick* adjustment) {
 void AccelerationTracker::update(float ax, float ay, float az) {
     /** Transform the given acceleration values to translations */
     float tx = cos(madgwick->getPitchRadians()) * ax + sin(madgwick->getPitchRadians()) * az;
-    float ty = cos(madgwick->getRollRadians()) * ay + sin(madgwick->getRollRadians()) * az;
-//    float tz = (-sin(madgwick->getRollRadians()) * ay + cos(madgwick->getRollRadians()) * az) / 2 +
-//               (-sin(madgwick->getPitchRadians()) * ax + cos(madgwick->getPitchRadians()) * az) / 2;
-    float offAxisProportion = abs(sin(madgwick->getRollRadians())) + abs(sin(madgwick->getPitchRadians()));
+    float ty = -cos(madgwick->getRollRadians()) * ay + sin(madgwick->getRollRadians()) * az;
+    float ty2 = cos(-madgwick->getRollRadians()) * ay + sin(madgwick->getRollRadians()) * az;
     float distance = sqrt(madgwick->getRollRadians()*madgwick->getRollRadians() + madgwick->getPitchRadians()*madgwick->getPitchRadians());
-    float tz = -sin(madgwick->getRollRadians()) * ay + sin(madgwick->getPitchRadians()) * ax
-//               + offAxisProportion * az;
-               - cos(distance) * az + .988;
+    float tz = sin(madgwick->getRollRadians()) * ay - sin(madgwick->getPitchRadians()) * ax
+               + cos(distance) * az;
+    float tz2 = tz - 1.02;
     if (lastReport + 1000000 < micros()) {
+        Serial.print("Orientation: ");
+        Serial.print(madgwick->getYaw());
+        Serial.print(" ");
+        Serial.print(madgwick->getPitch());
+        Serial.print(" ");
+        Serial.println(madgwick->getRoll());
+
+        Serial.print("\nCurrent Accelerometer:\n");
+        Serial.print(" X = ");
+        Serial.println(ax, 4);
+        Serial.print(" Y = ");
+        Serial.println(ay, 4);
+        Serial.print(" Z = ");
+        Serial.println(az, 4);
+        
         Serial.print("\nAdjusted Accelerometer:\n");
         Serial.print(" X1 = ");
         Serial.println(tx, 4);
         Serial.print(" Y1 = ");
         Serial.println(ty, 4);
+        Serial.print(" Y2 = ");
+        Serial.println(ty2, 4);
         Serial.print(" Z1 = ");
         Serial.println(tz, 4);
+        Serial.print(" Z2 = ");
+        Serial.println(tz2, 4);
         Serial.print(" sin(roll) = ");
-        Serial.println(sin(madgwick->getRollRadians()), 2);
-        Serial.print(" cos(roll) = ");
-        Serial.println(cos(madgwick->getRollRadians()), 2);
-
+        Serial.println(sin(madgwick->getRollRadians()), 4);
         lastReport = micros();
     }
     
     if (lastUpdate > 0) {
         long dt = micros() - lastUpdate;
+        // update velocity
+        float dampingFactor = 0.80;
+        vx = (vx + tx) * dampingFactor;
+        vy = (vy + ty) * dampingFactor;
+        vz = (vz + tz2) * dampingFactor;
         // move position based on velocity
+        x += vx * dt/100000;
+        y += vy * dt/100000;
+        z += vz * dt/100000;
     }
     lastUpdate = micros();
 }
 void AccelerationTracker::reset() {
+    Serial.print("\nVelocity:\n");
+    Serial.print(" X=");
+    Serial.print(vx, 4);
+    Serial.print(" Y=");
+    Serial.print(vy, 4);
+    Serial.print(" Z=");
+    Serial.println(vz, 4);
+    
+    Serial.print("\nPosition:\n");
+    Serial.print(" X=");
+    Serial.print(x, 4);
+    Serial.print(" Y=");
+    Serial.print(y, 4);
+    Serial.print(" Z=");
+    Serial.println(z, 4);
+    
     x = 0;
     y = 0;
     z = 0;
@@ -184,6 +222,8 @@ void reportIMU() {
       Serial.println("Device OK!");
   }
   
+  tracker.reset();
+  return;
   // https://how2electronics.com/using-imu-microphone-on-xiao-ble-nrf52840-sense/
   float x_val = myIMU.readFloatAccelX();
   float y_val = myIMU.readFloatAccelY();
@@ -236,7 +276,6 @@ void reportIMU() {
   float gx = myIMU.readFloatGyroX();
   float gy = myIMU.readFloatGyroY();
   float gz = myIMU.readFloatGyroZ();
-  gyroCalibration.update(x_val, y_val, z_val, gx, gy, gz);
   gyroCalibration.adjust(&gx, &gy, &gz);
 
   Serial.print("\nGyroscope:\n");
@@ -260,6 +299,7 @@ void reportIMU() {
   Serial.println(myIMU.readTempC(), 4);
   Serial.print(" Degrees F1 = ");
   Serial.println(myIMU.readTempF(), 4);
+  
 }
 
 void imuUpdate() {
@@ -270,6 +310,9 @@ void imuUpdate() {
     float gx = myIMU.readFloatGyroX();
     float gy = myIMU.readFloatGyroY();
     float gz = myIMU.readFloatGyroZ();
+    if (madgwickPrevious + madgwickInterval * 4 < micros()) {
+      gyroCalibration.update(ax, ay, az, gx, gy, gz);
+    }
     gyroCalibration.adjust(&gx, &gy, &gz);
     madgwickFilter.updateIMU(gx, gy, gz, ax, ay, az);
     tracker.update(ax, ay, az);
