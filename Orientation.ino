@@ -111,12 +111,20 @@ class AccelerationTracker {
 public:
     AccelerationTracker(Madgwick* adjustment);
     void update(float ax, float ay, float az);
+    void enableReporting();
     void reset();
     long lastUpdate = 0;
     long lastReport = 0;
+    long lastReportEnabled = 0;
+    float ax0 = 0;
+    float ay0 = 0;
+    float az0 = 0;
     float vx = 0;
     float vy = 0;
     float vz = 0;
+    float vx0 = 0;
+    float vy0 = 0;
+    float vz0 = 0;
     float x = 0;
     float y = 0;
     float z = 0;
@@ -170,17 +178,65 @@ void AccelerationTracker::update(float ax, float ay, float az) {
     
     if (lastUpdate > 0) {
         long dt = micros() - lastUpdate;
+        // update resting accelerometer reading
+        float a0Factor = 0.05;  // how weakly to update the a0
+        ax0 = ax0 * (1-a0Factor) + tx * a0Factor;
+        ay0 = ay0 * (1-a0Factor) + ty * a0Factor;
+        az0 = az0 * (1-a0Factor) + tz2 * a0Factor;
         // update velocity
-        float dampingFactor = 0.80;
-        vx = (vx + tx) * dampingFactor;
-        vy = (vy + ty) * dampingFactor;
-        vz = (vz + tz2) * dampingFactor;
+        float dampingFactor = 1;
+        vx = (vx + tx - ax0) * dampingFactor;
+        vy = (vy + ty - ay0) * dampingFactor;
+        vz = (vz + tz2 - az0) * dampingFactor;
         // move position based on velocity
         x += vx * dt/100000;
         y += vy * dt/100000;
         z += vz * dt/100000;
+        // gradually reset to the middle
+        float gravity = 0.99;
+        x *= gravity;
+        y *= gravity;
+        z *= gravity;
     }
     lastUpdate = micros();
+
+    if (lastReportEnabled > 0 && lastReportEnabled + 5000 > millis()) {
+        // JSON output
+        Serial.print("{");
+        Serial.print("\"p\":");
+        Serial.print(madgwick->getPitch(), 4);
+        Serial.print(",\"r\":");
+        Serial.print(madgwick->getRoll(), 4);
+        Serial.print(",\"ax\":");
+        Serial.print(tx, 4);
+        Serial.print(",\"ay\":");
+        Serial.print(ty, 4);
+        Serial.print(",\"az\":");
+        Serial.print(tz2, 4);
+        Serial.print(",\"ax0\":");
+        Serial.print(ax0, 4);
+        Serial.print(",\"ay0\":");
+        Serial.print(ay0, 4);
+        Serial.print(",\"az0\":");
+        Serial.print(az0, 4);
+        Serial.print(",\"vx\":");
+        Serial.print(vx, 4);
+        Serial.print(",\"vy\":");
+        Serial.print(vy, 4);
+        Serial.print(",\"vz\":");
+        Serial.print(vz, 4);
+        Serial.print(",\"x\":");
+        Serial.print(x, 4);
+        Serial.print(",\"y\":");
+        Serial.print(y, 4);
+        Serial.print(",\"z\":");
+        Serial.print(z, 4);
+        Serial.println("}");
+    }
+}
+
+void AccelerationTracker::enableReporting() {
+  lastReportEnabled = millis();
 }
 void AccelerationTracker::reset() {
     Serial.print("\nVelocity:\n");
@@ -198,13 +254,18 @@ void AccelerationTracker::reset() {
     Serial.print(y, 4);
     Serial.print(" Z=");
     Serial.println(z, 4);
-    
+    /*
     x = 0;
     y = 0;
     z = 0;
+    */
 }
 
 AccelerationTracker tracker = AccelerationTracker(&madgwickFilter);
+
+void enableOrientationReporting() {
+  tracker.enableReporting();
+}
 
 
 float copysign(float base, float mod1, float mod2) {

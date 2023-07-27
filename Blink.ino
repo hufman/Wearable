@@ -240,6 +240,47 @@ void loop() {
     }
     */
   }
+  readInput();
+}
+
+const byte serialInputSize = 127;
+char receivedChars[serialInputSize];
+byte receivedCharCount = 0;
+
+void readInput() {
+  byte origCount = receivedCharCount;
+  while (Serial.available()) {
+    char rc = Serial.read();
+    if (rc != '\n') {
+      receivedChars[receivedCharCount] = rc;
+      receivedCharCount++;
+      if (receivedCharCount == serialInputSize) {
+        resetInput();
+      }
+    } else {
+      parseInput();
+      resetInput();
+    }
+  }
+  if (origCount < receivedCharCount) {
+    Serial.print("!! Received input: ");
+    Serial.println(receivedChars);
+  }
+}
+
+void parseInput() {
+  // {"command": "enable_orientation_reporting"}
+  if (strcmp(receivedChars, "{\"command\": \"enable_orientation_reporting\"}") == 0) {
+    enableOrientationReporting();
+  } else {
+    Serial.print("!!!Unknown command: ");
+    Serial.println(receivedChars);
+  }
+}
+
+void resetInput() {
+  receivedCharCount = 0;
+  receivedChars[receivedCharCount] = 0;
 }
 
 // callback invoked when central connects
